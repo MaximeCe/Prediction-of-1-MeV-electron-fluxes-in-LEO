@@ -225,3 +225,14 @@ data/noaa15_daily/
 data/omni/
 figures/
 # Versionné volontairement : data/noaa15_p6_hourly_Lbins.parquet (table réduite, évite 20+ min de téléchargement)
+
+# --- Projet SP519 : données lourdes (re-téléchargeables) ---
+data/noaa15_raw/
+data/noaa15_daily/
+data/omni/
+figures/
+# Versionné volontairement : data/noaa15_p6_hourly_Lbins.parquet (table réduite, évite 20+ min de téléchargement)
+
+
+# Data files
+data/
