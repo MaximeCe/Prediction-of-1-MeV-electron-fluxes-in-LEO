@@ -7,3 +7,4 @@ cdflib
 pyarrow
 scikit-learn
 ipykernel
+requests

@@ -13,10 +13,11 @@ Les fichiers bruts NOAA-15 (~12 Go) et OMNI sont re-téléchargés automatiqueme
 (`data/noaa15_raw/`, `data/noaa15_daily/`, `data/omni/` sont ignorés par Git).
 
 ## Installation
+Avec [uv](https://docs.astral.sh/uv/) (crée `.venv` et installe `requirements.txt`, relançable sans risque) :
 ```bash
-pip install -r requirements.txt
+bash setup_env.sh
 ```
-Ouvrir le notebook dans VS Code, choisir l'interpréteur Python (ex. Anaconda) comme noyau, exécuter de haut en bas.
+Puis dans VS Code : *Select Kernel* → *Python Environments* → `.venv`, et exécuter le notebook de haut en bas.
 
 ## Sources
 - NOAA-15 SEM-2 / MEPED, NCEI : https://www.ncei.noaa.gov/products/poes-metop-space-environment-monitor
