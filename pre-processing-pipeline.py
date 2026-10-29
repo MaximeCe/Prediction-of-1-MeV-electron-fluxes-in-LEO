@@ -15,8 +15,8 @@ import argparse
 import dataclasses
 import sys
 
-from sp519 import pipeline, plots, qc
-from sp519.config import Config
+from preprocessing import pipeline, plots, qc
+from preprocessing.config import Config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,7 +63,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.download:
-        from sp519 import download
+        from preprocessing import download
 
         download.download_nc_files(years=args.download, months=range(1, 13))
         return 0

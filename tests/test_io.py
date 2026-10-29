@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from sp519 import io
+from preprocessing import io
 
 
 def test_load_noaa_hourly_returns_long_table_indexed_by_time():

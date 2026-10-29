@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sp519 import aggregate, clean, qc
-from sp519.config import Config
+from preprocessing import aggregate, clean, qc
+from preprocessing.config import Config
 
 
 def test_event_threshold_is_the_requested_percentile():

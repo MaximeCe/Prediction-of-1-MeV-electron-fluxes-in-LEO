@@ -6,8 +6,8 @@ import json
 import pandas as pd
 import pytest
 
-from sp519 import pipeline
-from sp519.config import Config
+from preprocessing import pipeline
+from preprocessing.config import Config
 
 from conftest import HOURS
 

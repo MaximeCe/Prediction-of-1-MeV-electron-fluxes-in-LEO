@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sp519 import aggregate, clean
-from sp519.config import Config
+from preprocessing import aggregate, clean
+from preprocessing.config import Config
 
 from conftest import HOURS
 
