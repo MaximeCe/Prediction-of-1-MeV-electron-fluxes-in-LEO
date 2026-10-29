@@ -8,3 +8,5 @@ pyarrow
 scikit-learn
 ipykernel
 requests
+xarray
+h5netcdf
