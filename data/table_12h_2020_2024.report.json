@@ -1,0 +1,97 @@
+{
+  "config": {
+    "l_range": [
+      3.0,
+      6.0
+    ],
+    "l_bin_step": 0.25,
+    "freq": "12h",
+    "flux_floor": 121.9512,
+    "min_hourly_samples": 1,
+    "min_coverage": 0.0,
+    "spe_percentile": 99.5,
+    "drop_contaminated": false,
+    "event_percentile": 95.0,
+    "noaa_path": "data/noaa15_p6_hourly_Lbins.parquet",
+    "omni_path": "data/omni_hourly_2020_2024.parquet",
+    "out_path": "data/table_12h_2020_2024.parquet",
+    "report_path": "data/table_12h_2020_2024.report.json",
+    "figures_dir": null
+  },
+  "cleaning": {
+    "n_input": 1234141,
+    "dropped_no_measurement": 0,
+    "dropped_outside_l_range": 679186,
+    "contamination_threshold": 0.6656129270051384,
+    "contaminated_hours": 2775,
+    "n_kept": 554955,
+    "l_bins_kept": [
+      3.0,
+      3.25,
+      3.5,
+      3.75,
+      4.0,
+      4.25,
+      4.5,
+      4.75,
+      5.0,
+      5.25,
+      5.5,
+      5.75,
+      6.0
+    ]
+  },
+  "omni": {
+    "n_input": 43848,
+    "duplicate_timestamps": 0,
+    "nan_share": {
+      "V_kms": 0.014687100893997445,
+      "Bz_nT": 0.0067733990147783255,
+      "F107_sfu": 0.0005473453749315818,
+      "N_cm3": 0.015302864440795476,
+      "P_nPa": 0.015302864440795476,
+      "E_mVm": 0.015987046159459953,
+      "B_nT": 0.0067733990147783255,
+      "Kp": 0.0,
+      "Dst_nT": 0.0,
+      "AE_nT": 0.0
+    },
+    "columns_all_nan": [],
+    "n_kept": 43848
+  },
+  "summary": {
+    "freq": "12h",
+    "l_range": [
+      3.0,
+      6.0
+    ],
+    "l_bins": [
+      3.0,
+      3.25,
+      3.5,
+      3.75,
+      4.0,
+      4.25,
+      4.5,
+      4.75,
+      5.0,
+      5.25,
+      5.5,
+      5.75,
+      6.0
+    ],
+    "n_l_bins": 13,
+    "n_rows": 46930,
+    "n_intervals": 3610,
+    "start": "2020-01-01 00:00:00",
+    "end": "2024-12-31 12:00:00",
+    "median_coverage": 1.0,
+    "min_coverage": 0.16666666666666666,
+    "median_flux": 892.8694845707673,
+    "event_percentile": 95.0,
+    "event_threshold": 13377.218834077707,
+    "event_threshold_log10": 4.126365831625975,
+    "n_events": 2347,
+    "fraction_events": 0.05001065416577882
+  }
+}

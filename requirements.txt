@@ -8,3 +8,4 @@ pyarrow
 scikit-learn
 ipykernel
 requests
+pytest
