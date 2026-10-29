@@ -1,22 +1,21 @@
 """
 cleaner.py
 ==========
-Step 1, first bullet of the SP519 project:
-"Clean and synchronize the data (missing values, invalid values, outliers, time stamps)."
+Step 1: "Clean and synchronize the data (missing values, invalid values, outliers, time stamps)".
 
-Nothing else is done here (no L selection, no averaging, no scaling, no windowing).
+Pipeline:  loader.iter_data -> clean_dataset -> data/cleaned/cleaned.parquet
+           -> loader.load_cleaned_data -> biner.bin_mean -> visualizer
 
-    as_dataframe   time stamps : any loader output -> float64 DataFrame, naive-UTC sorted unique index
-    clean_raw      invalid / missing values : fill values -> NaN, invalid L, in-flight calibration,
-                   rows without target or L removed; outliers -> NaN (IQR rule, per L bin)
-    synchronize    put other series (OMNI: V, Bz, F10.7...) on the NOAA time stamps
-    clean          as_dataframe + clean_raw in one call, returns (df, report)
-    save_cleaned   write the result to data/cleaned, only if that folder is empty
+``clean_dataset`` reads the files twice, one chunk at a time, so the dataset is never fully in memory:
+  pass 1  histogram of log10(flux) over all chunks      -> global outlier bounds (IQR rule)
+  pass 2  clean each chunk, keep L_RANGE, remove outliers, attach the solar parameters,
+          append the chunk to ONE parquet file (the one ``loader.load_cleaned_data`` reads)
+Nothing is written if ``data/cleaned`` is not empty.
 """
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 import numpy as np
@@ -24,21 +23,22 @@ import pandas as pd
 
 TARGET = "mep_pro_tel90_flux_p6"
 L_COL = "L_IGRF"
+L_RANGE = (3.5, 5.0)  # region predicted, given by the L module
+OUTLIER_K = 3.0  # outlier = outside [Q1 - k*IQR, Q3 + k*IQR] on log10(flux)
 P6_COUNT_STEP = 243.9024  # flux of one count in the P6 channel [#/cm2-s-str]
-L_VALID_RANGE = (1.0, 20.0)  # L outside is a fill value (-1) or an open field line
+RAW_COLUMNS = (TARGET, L_COL, "mep_IFC_on")  # the only variables read from the 158 of a file
 
-RAW_COLUMNS = (TARGET, "mep_pro_tel0_flux_p6", "mep_ele_tel90_flux_e3", L_COL, "MLT",
-               "mag_lat_sat", "lat", "lon", "alt", "Btot_sat", "mep_IFC_on")
+LOG_EDGES = np.arange(0.0, 8.0 + 1e-9, 0.005)  # histogram bins of log10(flux), 0.005 resolution
 
 
 @dataclass
 class CleanConfig:
     target: str = TARGET
     l_col: str = L_COL
-    drop_ifc: bool = True  # drop samples taken during in-flight calibration (flag == 1)
-    outlier_k: float | None = 3.0  # IQR multiplier on log10 flux (None = keep outliers)
-    outlier_l_bin: float = 1.0  # outliers are searched inside L bins of this width
-    outlier_min_group: int = 50  # minimum positive samples in a bin to apply the rule
+    drop_ifc: bool = True  # drop samples taken during in-flight calibration
+    outlier_k: float | None = OUTLIER_K  # None = keep outliers
+    solar_fill_values: dict = field(default_factory=dict)  # e.g. {"V": 99999.9, "Bz": 999.99}
+    solar_tolerance: str = "1h"  # max time distance between a NOAA sample and a solar value
 
 
 # --------------------------------------------------------------------------------------
@@ -55,31 +55,21 @@ def _to_datetime_index(t) -> pd.DatetimeIndex:
 
 
 def as_dataframe(data, columns: Iterable[str] | None = None) -> pd.DataFrame:
-    """Loader chunk -> float64 DataFrame indexed by naive-UTC, sorted, unique time stamps.
-
-    Accepts a DataFrame, an xarray.Dataset, a dict of arrays or a NetCDF path. For xarray the
-    variables are read one by one (``columns`` defaults to ``RAW_COLUMNS``): in the NCEI files
-    every variable is also its own dimension, so ``Dataset.to_dataframe()`` would explode.
-    """
+    """Loader chunk (or any DataFrame / dict / xarray / path) -> float64 DataFrame
+    indexed by naive-UTC time stamps. ``columns`` restricts the variables kept."""
     if isinstance(data, (str, os.PathLike)):
         import xarray as xr
 
         data = xr.open_dataset(data, decode_times=False)
-
     if isinstance(data, pd.DataFrame):
         df = data.copy()
-        if columns is not None:
-            keep = [c for c in columns if c in df.columns]
-            df = df[keep + (["time"] if "time" in df.columns and "time" not in keep else [])]
-    elif hasattr(data, "variables") and hasattr(data, "attrs"):  # xarray.Dataset
-        names = [c for c in (columns or RAW_COLUMNS) if c in data.variables]
-        df = pd.DataFrame({n: np.asarray(data[n].values) for n in names})
-        if "time" in data.variables:
-            df["time"] = np.asarray(data["time"].values)
+    elif hasattr(data, "variables"):  # xarray.Dataset (read variable by variable, see loader)
+        names = [c for c in (columns or RAW_COLUMNS) if c in data.variables] + ["time"]
+        df = pd.DataFrame({n: np.asarray(data[n].values) for n in dict.fromkeys(names)})
     else:
         df = pd.DataFrame({k: np.asarray(v) for k, v in dict(data).items()})
-        if columns is not None:
-            df = df[[c for c in [*columns, "time"] if c in df.columns]]
+    if columns is not None:
+        df = df[[c for c in dict.fromkeys([*columns, "time"]) if c in df.columns]]
 
     if isinstance(df.index, pd.DatetimeIndex):
         idx = df.index
@@ -94,142 +84,161 @@ def as_dataframe(data, columns: Iterable[str] | None = None) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------------------
-# Invalid / missing values and outliers
+# Invalid / missing values (one chunk)
 # --------------------------------------------------------------------------------------
-def mask_outliers(df: pd.DataFrame, cfg: CleanConfig) -> pd.Series:
-    """Boolean mask of outliers of the target: IQR rule on log10 flux, per L bin.
-
-    Zero-count samples are real values and are neither used for the quartiles nor flagged.
-    Bins with fewer than ``outlier_min_group`` positive samples are left untouched.
-    """
-    out = pd.Series(False, index=df.index)
-    if cfg.outlier_k is None:
-        return out
-    flux = df[cfg.target]
-    logv = np.log10(flux.where(flux > 0))
-    lbin = np.floor(df[cfg.l_col] / cfg.outlier_l_bin)
-    g = logv.groupby(lbin)
-    q = g.quantile([0.25, 0.75]).unstack()
-    n = g.count()
-    ok = n >= cfg.outlier_min_group
-    q1, q3 = lbin.map(q[0.25].where(ok)), lbin.map(q[0.75].where(ok))
-    iqr = q3 - q1
-    return ((logv < q1 - cfg.outlier_k * iqr) | (logv > q3 + cfg.outlier_k * iqr)).fillna(False)
-
-
-def clean_raw(df: pd.DataFrame, cfg: CleanConfig | None = None) -> tuple[pd.DataFrame, dict]:
-    """Remove invalid and missing values, flag outliers. Returns ``(clean_df, report)``."""
-    cfg = cfg or CleanConfig()
-    for c in (cfg.target, cfg.l_col):
-        if c not in df.columns:
-            raise KeyError(f"column {c!r} missing (got {list(df.columns)})")
-    df = df.copy()
-    rep = {"n_raw": len(df),
-           "duplicate_timestamps": int(df.index.duplicated().sum()),
-           "unsorted_timestamps": int((df.index.to_series().diff() < pd.Timedelta(0)).sum())}
+def clean_chunk(chunk, cfg: CleanConfig, l_range=L_RANGE) -> tuple[pd.DataFrame, dict]:
+    """Clean one loader chunk and keep ``l_range``. Returns ``(df[target, L], report)``."""
+    df = as_dataframe(chunk, RAW_COLUMNS)
+    rep = {"n_raw": len(df), "duplicate_timestamps": int(df.index.duplicated().sum())}
     df = df[~df.index.duplicated(keep="first")].sort_index()
 
-    # fill values (-999 in several MEPED channels) are negative fluxes -> NaN
-    for c in [c for c in df.columns if "flux" in c]:
-        bad = df[c] < 0
-        if bad.any():
-            rep[f"fill_values_{c}"] = int(bad.sum())
-            df.loc[bad, c] = np.nan
+    bad = df[cfg.target] < 0  # fill values (-999) -> missing
+    rep["fill_values"] = int(bad.sum())
+    df.loc[bad, cfg.target] = np.nan
 
-    # invalid L: -1 fill value, open field lines (L ~ 100)
-    bad_l = ~df[cfg.l_col].between(*L_VALID_RANGE)
-    rep["invalid_L"] = int(bad_l.sum())
-    df.loc[bad_l, cfg.l_col] = np.nan
-
-    # in-flight calibration (flag 1 = on; -1 is "not applicable" and kept)
-    if cfg.drop_ifc and "mep_IFC_on" in df.columns:
+    if cfg.drop_ifc and "mep_IFC_on" in df:  # in-flight calibration (1 = on; -1 = n/a, kept)
         ifc = df["mep_IFC_on"] == 1
         rep["ifc_on"] = int(ifc.sum())
         df = df[~ifc]
 
-    # missing values: a sample is useless without target or L
-    miss = df[[cfg.target, cfg.l_col]].isna().any(axis=1)
-    rep["rows_removed_missing"] = int(miss.sum())
-    df = df[~miss]
-
-    # outliers -> NaN on the target, then drop those rows
-    out = mask_outliers(df, cfg)
-    rep["outliers"] = int(out.sum())
-    df = df[~out]
-    rep["n_clean"] = len(df)
-    return df, rep
-
-
-def clean(data, cfg: CleanConfig | None = None, columns=None) -> tuple[pd.DataFrame, dict]:
-    """``as_dataframe`` + ``clean_raw``."""
-    return clean_raw(as_dataframe(data, columns), cfg)
+    rep["missing_target"] = int(df[cfg.target].isna().sum())
+    keep = df[cfg.target].notna() & df[cfg.l_col].between(*l_range)  # invalid L (-1, >20) falls out too
+    rep["removed_missing_or_outside_L"] = int((~keep).sum())
+    return df.loc[keep, [cfg.target, cfg.l_col]], rep
 
 
 # --------------------------------------------------------------------------------------
-# Synchronisation
+# Outliers on the whole dataset, without loading it
 # --------------------------------------------------------------------------------------
-def synchronize(base: pd.DataFrame, *others: pd.DataFrame, tolerance: str = "1h") -> pd.DataFrame:
-    """Attach other series (e.g. OMNI V, Bz, F10.7) to the NOAA time stamps.
+def outlier_bounds(chunks, cfg: CleanConfig, l_range=L_RANGE) -> tuple[float, float]:
+    """Global (low, high) bounds of log10(flux): pass 1 over all chunks.
 
-    Each value is the nearest one in time, accepted only within ``tolerance`` (else NaN).
-    ``others`` go through ``as_dataframe`` so they can come in any format / time unit.
+    ``chunks`` is a callable returning a fresh iterator of chunks (e.g. ``loader.iter_data``).
+    Only a histogram is kept in memory; quartiles are read from it (resolution 0.005 in log10).
+    Zero-count samples are real values: ignored by the quartiles and never flagged.
     """
-    out = base.copy()
-    tol = pd.Timedelta(tolerance)
-    for o in others:
-        o = as_dataframe(o)
-        o = o[~o.index.duplicated(keep="first")].sort_index()
-        o = o.drop(columns=[c for c in o.columns if c in out.columns])
-        out = out.join(o.reindex(out.index, method="nearest", tolerance=tol))
-    return out
+    hist = np.zeros(len(LOG_EDGES) - 1)
+    for chunk in chunks():
+        df, _ = clean_chunk(chunk, cfg, l_range)
+        flux = df[cfg.target]
+        hist += np.histogram(np.log10(flux[flux > 0]), LOG_EDGES)[0]
+    if hist.sum() == 0:
+        raise ValueError("no positive flux in the selected L range")
+    cdf = hist.cumsum() / hist.sum()
+    centers = (LOG_EDGES[:-1] + LOG_EDGES[1:]) / 2
+    q1, q3 = (centers[np.searchsorted(cdf, p)] for p in (0.25, 0.75))
+    return q1 - cfg.outlier_k * (q3 - q1), q3 + cfg.outlier_k * (q3 - q1)
 
 
 # --------------------------------------------------------------------------------------
-# Saving
+# Synchronisation with the solar parameters
 # --------------------------------------------------------------------------------------
-def save_cleaned(df: pd.DataFrame, outdir: str = "data/cleaned", name: str | None = None) -> str | None:
-    """Save the cleaned data in ``outdir`` (created if needed) ONLY if the folder is empty.
+def clean_solar(solar, fill_values: dict | None = None) -> pd.DataFrame:
+    """Solar parameters (V, Bz, F10.7...) -> DataFrame with a UTC index; fill values -> NaN."""
+    df = as_dataframe(solar)
+    for col, val in (fill_values or {}).items():
+        if col in df:
+            df.loc[np.isclose(df[col], val), col] = np.nan
+    return df[~df.index.duplicated(keep="first")].sort_index()
 
-    Parquet if pyarrow/fastparquet is installed, otherwise gzipped CSV. Returns the written path,
-    or None when the folder already contains files (nothing is overwritten).
+
+def synchronize(base: pd.DataFrame, other: pd.DataFrame, tolerance: str = "1h") -> pd.DataFrame:
+    """Attach to each time stamp of ``base`` the nearest value of ``other`` (NaN beyond ``tolerance``)."""
+    other = other.drop(columns=[c for c in other.columns if c in base.columns])
+    return base.join(other.reindex(base.index, method="nearest", tolerance=pd.Timedelta(tolerance)))
+
+
+# --------------------------------------------------------------------------------------
+# Whole dataset
+# --------------------------------------------------------------------------------------
+def cleaned_dir() -> str:
+    """Folder read by ``loader.load_cleaned_data``."""
+    from loader import CLEANED_DATA_DIR, DATA_DIR
+
+    return os.path.join(DATA_DIR, CLEANED_DATA_DIR)
+
+
+def clean_dataset(chunks, cfg: CleanConfig | None = None, solar=None, l_range=L_RANGE,
+                  outdir: str | None = None) -> dict | None:
+    """Clean the whole dataset chunk by chunk and write ``outdir/cleaned.parquet``.
+
+    ``chunks`` : callable returning an iterator of chunks (``loader.iter_data``); read twice
+    ``solar``  : optional DataFrame of solar parameters, attached to the NOAA time stamps
+    Returns the report (summed over chunks), or None if ``outdir`` is not empty (nothing done).
+    Needs pyarrow.
     """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    cfg, outdir = cfg or CleanConfig(), outdir or cleaned_dir()
     os.makedirs(outdir, exist_ok=True)
     if os.listdir(outdir):
-        print(f"{outdir} is not empty: nothing saved")
+        print(f"{outdir} is not empty: nothing done")
         return None
-    name = name or f"cleaned_{df.index[0]:%Y%m%d}_{df.index[-1]:%Y%m%d}"
+
+    low, high = outlier_bounds(chunks, cfg, l_range) if cfg.outlier_k is not None else (-np.inf, np.inf)
+    if solar is not None:
+        solar = clean_solar(solar, cfg.solar_fill_values)
+
+    path, writer, last, total = os.path.join(outdir, "cleaned.parquet"), None, None, {}
     try:
-        path = os.path.join(outdir, name + ".parquet")
-        df.to_parquet(path)
-    except ImportError:
-        path = os.path.join(outdir, name + ".csv.gz")
-        df.to_csv(path)
-    print(f"saved {len(df)} rows to {path}")
-    return path
+        for chunk in chunks():
+            df, rep = clean_chunk(chunk, cfg, l_range)
+            flux = df[cfg.target]
+            logf = np.log10(flux.where(flux > 0))  # zeros -> NaN -> never flagged
+            out = (logf < low) | (logf > high)
+            rep["outliers"] = int(out.sum())
+            df = df[~out]
+            if solar is not None:
+                df = synchronize(df, solar, cfg.solar_tolerance)
+            if last is not None:  # same time stamp at the border of two files
+                rep["duplicates_between_files"] = int((df.index <= last).sum())
+                df = df[df.index > last]
+            if df.empty:
+                continue
+            last = df.index[-1]
+            table = pa.Table.from_pandas(df)
+            writer = writer or pq.ParquetWriter(path, table.schema)
+            writer.write_table(table)
+            rep["n_clean"] = len(df)
+            for k, v in rep.items():
+                total[k] = total.get(k, 0) + v
+        if writer is None:
+            raise ValueError("no data left after cleaning")
+    except BaseException:
+        if writer:
+            writer.close()
+            writer = None
+        if os.path.exists(path):
+            os.remove(path)  # never leave a half-written file: it would block the next run
+        raise
+    writer.close()
+    total.update(outlier_low_log10=float(low), outlier_high_log10=float(high))
+    return total
 
 
 # --------------------------------------------------------------------------------------
 # Demo
 # --------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    from loader import iter_data
+    from loader import iter_data, load_cleaned_data
 
-    data = iter_data().__next__()  # Load the first chunk of data
-    cfg = CleanConfig()
+    try:  # solar parameters: no function for them in the loader yet
+        from loader import load_solar_data
 
-    df = as_dataframe(data)
-    print(f"raw: {len(df)} samples, {df.index[0]} -> {df.index[-1]}")
-    clean_df, rep = clean_raw(df, cfg)
-    print("\ncleaning report:")
-    for k, v in rep.items():
-        print(f"  {k:<28}{v:>8}")
-    print(f"\nremaining NaN in target / L: {int(clean_df[[cfg.target, cfg.l_col]].isna().sum().sum())}")
-    print(f"time stamps sorted & unique: {clean_df.index.is_monotonic_increasing and clean_df.index.is_unique}")
+        solar = load_solar_data()
+    except ImportError:
+        solar = None
+        print("loader.load_solar_data not found: the solar parameters are NOT attached\n")
 
-    # Synchronisation demo with a SYNTHETIC hourly series (replace it by OMNI V, Bz, F10.7).
-    fake = pd.DataFrame({"V": 400 + 50 * np.sin(np.arange(30) / 4)},
-                        index=pd.date_range(df.index[0].floor("h"), periods=30, freq="1h"))
-    sync = synchronize(clean_df, fake, tolerance="1h")
-    print("\nafter synchronize:\n", sync[[cfg.target, cfg.l_col, "V"]].head(3))
+    report = clean_dataset(iter_data, solar=solar)  # pass the function: it is read twice
+    if report:
+        print("cleaning report (summed over all files):")
+        for k, v in report.items():
+            print(f"  {k:<32}{v:>12.4g}" if isinstance(v, float) else f"  {k:<32}{v:>12}")
 
-    save_cleaned(clean_df)  # data/cleaned/, only if the folder is empty
+        cleaned = load_cleaned_data()  # what the next modules will read
+        print(f"\ncleaned data: {cleaned.shape}, columns {list(cleaned.columns)}")
+        print("L in range:", cleaned[L_COL].between(*L_RANGE).all(),
+              "| no NaN in flux/L:", not cleaned[[TARGET, L_COL]].isna().any().any(),
+              "| time sorted & unique:", cleaned.index.is_monotonic_increasing and cleaned.index.is_unique)
