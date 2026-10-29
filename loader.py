@@ -1,30 +1,40 @@
 """file to load the data from the data folder."""
 import os
+
 DATA_DIR = os.getenv("DATA_DIR", "data")  # Default to "data" if not set
 
-def load_data(data_folder=DATA_DIR):
-    """Load all .nc files from the specified data folder into a single dataframe."""
-    import os
+
+def iter_data(data_folder=DATA_DIR):
+    """Yield one DataFrame per .nc file to keep memory use bounded."""
     import pandas as pd
     import xarray as xr
 
-    # List all .nc files in the data folder
-    nc_files = [f for f in os.listdir(data_folder) if f.endswith('.nc')]
+    nc_files = sorted(
+        f for f in os.listdir(data_folder) if f.endswith(".nc")
+    )
+    if not nc_files:
+        raise FileNotFoundError(f"No .nc files found in {data_folder!r}")
 
-    # Load each .nc file into a DataFrame and concatenate them
-    dataframes = []
     for nc_file in nc_files:
         file_path = os.path.join(data_folder, nc_file)
-        ds = xr.open_dataset(file_path)
-        df = ds.to_dataframe().reset_index()
-        dataframes.append(df)
+        with xr.open_dataset(file_path) as ds:
+            yield pd.DataFrame(
+                {
+                    name: coord.values
+                    for name, coord in ds.coords.items()
+                    if coord.ndim == 1
+                }
+            )
 
-    # Concatenate all DataFrames into a single DataFrame
-    combined_df = pd.concat(dataframes, ignore_index=True)
-    
-    return combined_df
+
+def load_data(data_folder=DATA_DIR):
+    """Load and concatenate every .nc file; use iter_data to limit memory use."""
+    import pandas as pd
+
+    return pd.concat(iter_data(data_folder), ignore_index=True)
 
 if __name__ == "__main__":
-    # Example usage
-    combined_data = load_data()
-    print(combined_data.head())
+    for index, chunk in enumerate(iter_data(), start=1):
+        print(f"Loaded file {index}: {len(chunk)} rows")
+        if index == 1:
+            print(chunk.head())
