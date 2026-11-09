@@ -30,7 +30,7 @@ if [ -f .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; else PY=.v
 # de la vérifier : on réessaie donc chaque module quelques fois avant de conclure à une erreur.
 echo ">> Vérification des imports (peut prendre 1-2 min la première fois)"
 ECHEC=0
-for m in numpy pandas matplotlib scipy h5py cdflib pyarrow sklearn ipykernel requests; do
+for m in numpy pandas matplotlib scipy h5py cdflib pyarrow sklearn ipykernel requests pytest; do
     ok=0
     for essai in 1 2 3; do
         if "$PY" -c "import $m" 2>/dev/null; then ok=1; break; fi

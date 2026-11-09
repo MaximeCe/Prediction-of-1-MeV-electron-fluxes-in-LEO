@@ -10,3 +10,4 @@ ipykernel
 requests
 xarray
 h5netcdf
+pytest

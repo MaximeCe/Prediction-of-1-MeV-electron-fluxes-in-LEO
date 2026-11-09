@@ -219,20 +219,15 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# --- Projet SP519 : données lourdes (re-téléchargeables) ---
+# --- Projet SP519 ---
+# Données lourdes, re-téléchargeables (sp519.download) : jamais versionnées.
 data/noaa15_raw/
 data/noaa15_daily/
 data/omni/
 figures/
-# Versionné volontairement : data/noaa15_p6_hourly_Lbins.parquet (table réduite, évite 20+ min de téléchargement)
-
-# --- Projet SP519 : données lourdes (re-téléchargeables) ---
-data/noaa15_raw/
-data/noaa15_daily/
-data/omni/
-figures/
-# Versionné volontairement : data/noaa15_p6_hourly_Lbins.parquet (table réduite, évite 20+ min de téléchargement)
-
-
-# Data files
-data/
+# Tables réduites, versionnées volontairement : les deux entrées horaires du pré-traitement
+# (leur réduction depuis le brut prend ~20 min) et la table 12 h du Step 1.
+!data/noaa15_p6_hourly_Lbins.parquet
+!data/omni_hourly_2020_2024.parquet
+!data/table_12h_2020_2024.parquet
+!data/*.report.json
