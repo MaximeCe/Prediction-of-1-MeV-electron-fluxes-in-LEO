@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from preprocessing import config as C
+from sp519 import config as C
 
 
 def test_l_range_is_the_justified_choice():
