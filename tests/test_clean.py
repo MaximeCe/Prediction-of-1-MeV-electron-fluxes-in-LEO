@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sp519 import clean
-from sp519.config import Config
+from preprocessing import clean
+from preprocessing.config import Config
 
 from conftest import FLUX_BY_LBIN, HOURS, LBINS, SPE_HOUR
 

@@ -34,7 +34,7 @@ HORIZONS_H = (12, 24, 36, 48)  # prediction horizons of Step 2, in hours
 # mep_pro_tel90_flux_p6: the P6 channel of the 90 deg telescope. It is a *proton* channel
 # (>6.9 MeV) but in the belts its counts are dominated by electrons above ~1 MeV, which is
 # why it is used as the >1 MeV electron flux. During a Solar Proton Event it counts protons
-# again, hence the contamination flag handled in sp519.clean.
+# again, hence the contamination flag handled in preprocessing.clean.
 TARGET = "mep_pro_tel90_flux_p6"
 P6_COUNT_STEP = 243.9024  # flux of a single count [#/cm2/s/sr]
 FLUX_FLOOR = P6_COUNT_STEP / 2  # value used for a 0-count bin before log10

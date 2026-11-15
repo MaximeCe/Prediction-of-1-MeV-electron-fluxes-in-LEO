@@ -1,0 +1,177 @@
+% =====================================================================
+%  SP519 - Space Data Processing - Rapport de projet
+%  Prédiction du flux d'électrons de 1 MeV en orbite basse (NOAA-15)
+%  Compilation : pdflatex rapport_SP519.tex   (ou lualatex)
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[margin=2cm]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parskip}{0.25em}
+\setlength{\parindent}{0pt}
+
+\title{\vspace{-1.6cm}\textbf{Prédiction du flux d'électrons de 1 MeV en orbite basse\\ à partir de NOAA-15 et des données de vent solaire}}
+\author{Maxime Cellier \quad\textbullet\quad Alexandre Saint-Paul \\[2pt]
+        \small SP519 -- Space Data Processing -- IPSA, automne 2026}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.7cm}
+
+\section{Introduction et objectifs}
+
+Les électrons $>$\,1\,MeV chargent les satellites en orbite basse (LEO) et peuvent endommager
+l'électronique ; leur flux varie de plusieurs ordres de grandeur en un à deux jours après une
+perturbation du vent solaire. Sa prévision est un enjeu de météorologie de l'espace. NOAA-15 est
+un satellite polaire ($\approx 810$\,km) qui traverse les ceintures de radiation à chaque orbite,
+la position le long de la ligne de champ étant décrite par le paramètre de McIlwain $L$.
+
+Le projet construit une chaîne complète, des données brutes à la prédiction, sur 2020--2024, avec
+deux volets : \textbf{régression} du flux futur à $+12/+24/+36/+48$\,h, et \textbf{classification}
+de la survenue d'un « événement » (flux au-dessus du 95\ieme{} percentile).
+
+\section{Données et prétraitement}
+
+\subsection{Sources}
+Le flux cible est le canal \texttt{mep\_pro\_tel90\_flux\_p6} de SEM-2 (MEPED) sur NOAA-15
+(portail NOAA/NCEI), agrégé heure par heure et par tranche de $L$ de 0,25 : 1\,234\,141 lignes,
+sur 1\,808 jours. Ce canal est nominalement un canal \emph{protons} ($>$\,6,9\,MeV) mais, dans
+les ceintures, ses comptages sont dominés par les électrons $>$\,1\,MeV — sauf pendant une
+éruption solaire à protons, où il mesure à nouveau des protons (cas « où il ne mesure pas des
+électrons »).
+
+Les paramètres proviennent d'OMNI2 horaire (NASA SPDF/CDAWeb, lu avec \texttt{cdflib}) : $V$,
+$B_z$, $F10.7$, $N$, $P$, $E$, $|B|$ et les indices $K_p$, $Dst$, $AE$ ($<$\,1,6\,\% manquant).
+
+\subsection{Nettoyage et synchronisation}
+Sur les \textbf{mesures brutes de 2\,s} : valeurs de remplissage ($-999$) mises à NaN, $L$
+invalides et mesures d'étalonnage en vol retirés. Sur la \textbf{table horaire} : une heure sans
+mesure ($n=0$) est un trou, un flux nul est au contraire une vraie mesure « 0 particule » ; les
+pics aberrants isolés (jusqu'à $9{,}8\times10^{7}$, contre un 99,99\ieme{} percentile
+$\approx 10^{6}$) sont retirés au-delà de $10^{7}$ ; les heures contaminées par des protons
+solaires sont repérées dans la calotte polaire ($L\ge 10$) par un seuil
+\emph{médiane\,+\,10\,$\times$MAD} tenu $\ge 2$\,h, puis retirées. Bilan : 1\,210\,218 lignes
+conservées sur 1\,234\,141, dont 23\,923 retirées pour contamination protonique.
+
+\subsection{Région prédite et moyennage sur 12\,h}
+La région retenue est $3 \le L < 6$. En dessous de $L=3$, le canal compte surtout des protons
+piégés (ceinture interne, anomalie sud-atlantique) ; au-delà de $L\approx 6$, le flux décroît
+fortement (574\,\#/cm²/s/sr à $L=6$, 214 à $L=6{,}75$) vers le bruit instrumental
+(133\,\#/cm²/s/sr). La région contient le maximum du flux (vers $L\approx 4{,}25$) et remplit les
+trois critères attendus : flux $>2\times$ le bruit dans \textbf{92\,\%} des fenêtres, forte
+\textbf{variabilité} (écart-type de $\log_{10}$ flux $\approx 0{,}53$), \textbf{lien avec le vent
+solaire} (Spearman avec $V$ à $-24$\,h $\approx 0{,}36$).
+
+Tous les paramètres sont moyennés sur des \textbf{fenêtres de 12\,h}. Le flux vaut
+$\sum p6\_sum / \sum n$ ; une fenêtre est invalide si elle a moins de 25\,\% du nombre médian de
+mesures, et les trous courts ($\le 5$ jours) sont interpolés (colonne \texttt{interpole}). La
+table finale compte 3\,654 fenêtres et sert d'entrée à la modélisation.
+
+\section{Analyse statistique}
+
+Le $\log_{10}$ du flux est compact (moyenne $3{,}23$, écart-type $0{,}53$, de $1{,}97$ à
+$4{,}64$). Les corrélations \emph{retardées} confirment le délai d'accélération : $V$ atteint
+$+0{,}45$ à 60\,h, $K_p$ $+0{,}41$ à 84\,h, $AE$ $+0{,}38$, $Dst$ $-0{,}38$ à 60\,h, $F10.7$
+$+0{,}26$ ; $B_z$ instantané est peu corrélé ($-0{,}07$). Les extrêmes des paramètres solaires
+tombent sept fois plus souvent pendant un orage (23\,\% contre 3\,\%) : ce sont de vrais
+phénomènes, conservés car ce sont les situations à prédire.
+
+Le \textbf{seuil d'événement}, 95\ieme{} percentile du flux des fenêtres mesurées, vaut
+\textbf{12\,500\,\#/cm²/s/sr} ($\log_{10}\approx 4{,}10$) : 178 fenêtres (5,0\,\%) en 59 épisodes
+(14 en 2024). Pour le volet classification il est \emph{recalculé sur la seule période
+d'entraînement}, afin de ne pas utiliser d'information sur le futur.
+
+\section{Modélisation}
+
+\subsection{Protocole}
+Le test joue le rôle d'un futur jamais vu : découpage \textbf{chronologique} (entraînement avant
+2024, test en 2024), fenêtres interpolées exclues du test. Chaque modèle est comparé à la
+\emph{persistance} (flux futur $=$ flux actuel). Les entrées sont le $\log_{10}$ du flux et les
+paramètres solaires à $t$, $t-12$\,h et $t-24$\,h.
+
+\subsection{Régression}
+Une régression linéaire (entrées standardisées) et une forêt aléatoire sont entraînées par
+horizon ; les métriques sur le test (en unités de $\log_{10}$ flux) sont données
+tableau~\ref{tab:reg}.
+
+\begin{table}[h]
+\centering\small
+\caption{Régression : RMSE ($R^2$) sur le test 2024.}
+\label{tab:reg}
+\begin{tabular}{lcccc}
+\toprule
+& $+12$\,h & $+24$\,h & $+36$\,h & $+48$\,h \\
+\midrule
+Persistance          & 0,204 (0,874) & 0,212 (0,863) & 0,289 (0,744) & 0,286 (0,749) \\
+Régression linéaire  & \textbf{0,155 (0,927)} & \textbf{0,176 (0,906)} & \textbf{0,216 (0,857)} & \textbf{0,225 (0,844)} \\
+Random Forest        & 0,165 (0,917) & 0,196 (0,883) & 0,246 (0,815) & 0,266 (0,782) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La régression linéaire \textbf{bat la persistance à tous les horizons}, avec un gain qui croît
+avec l'horizon (le vent solaire des jours précédents apporte de l'information que le flux actuel
+n'a pas). La forêt fait \emph{moins bien} en moyenne : son erreur se concentre sur les flux bas,
+où elle ne peut pas prolonger une tendance ; ailleurs elle est légèrement meilleure. Ses entrées
+utiles sont le flux actuel et passé (66 à 83\,\% de l'importance). Sur les \textbf{grandes
+variations} (facteur $\ge 3$), les deux modèles réduisent nettement l'erreur de la persistance
+(RMSE $\approx 0{,}40$--$0{,}45$ contre $0{,}67$--$0{,}74$), qui reste d'un facteur 2,5 à 3.
+
+\subsection{Classification}
+Trois classifieurs sont comparés (régression logistique, SVM RBF, forêt aléatoire ; probabilités
+par \texttt{CalibratedClassifierCV} pour le SVM). Le test contient 498 fenêtres dont 40
+événements (8,0\,\%) : les classes sont très déséquilibrées et l'\emph{accuracy} seule est
+trompeuse (un modèle qui ne prédit jamais d'événement atteindrait déjà 92\,\%). On juge sur l'AUC
+et le F1 (tableau~\ref{tab:clf}).
+
+\begin{table}[h]
+\centering\small
+\caption{Classification : métriques sur le test (498 fenêtres, 40 événements).}
+\label{tab:clf}
+\begin{tabular}{lccccc}
+\toprule
+Modèle & Accuracy & Précision & Rappel & F1 & AUC \\
+\midrule
+Régression logistique & 0,58 & 0,137 & \textbf{0,80} & \textbf{0,234} & \textbf{0,789} \\
+SVM (RBF)             & 0,92 & 0,00  & 0,00 & 0,00 & 0,697 \\
+Random Forest         & 0,92 & 0,00  & 0,00 & 0,00 & 0,702 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Seule la régression logistique détecte réellement des événements. Le SVM et la forêt ont une AUC
+proche de 0,70, mais leur seuil implicite de 0,5 sur la probabilité ne produit aucune détection
+(classe positive à $\approx 5$\,\%, pondérations de classes). L'AUC, qui mesure la capacité de
+\emph{classement}, est donc le résultat le plus robuste.
+
+\section{Discussion et perspectives}
+
+Une part réelle mais modérée du flux est prédictible : la régression linéaire explique 84 à
+93\,\% de la variance de $+12$ à $+48$\,h, et l'AUC de classification atteint 0,79. Deux limites
+ressortent : la \textbf{taille de l'échantillon d'événements} (le flux de 2024 étant plus bas, le
+seuil appris capture davantage de fenêtres au test et le F1 est instable), et la mauvaise
+anticipation de la \textbf{frange externe} et des \textbf{orages}.
+
+Pistes : élargir la période de test (2023--2024) et utiliser une validation croisée glissante ;
+entraîner des modèles \emph{par tranche de $L$} plutôt qu'une région moyennée ; ajouter des
+paramètres et mesurer le gain ; analyser le comportement des modèles pendant la tempête de mai
+2024.
+
+\section*{Références}
+\small
+\begin{itemize}\setlength{\itemsep}{0pt}
+  \item NOAA/NCEI, \emph{POES/MetOp SEM-2} : \url{https://www.ncei.noaa.gov/products/poes-metop-space-environment-monitor}
+  \item NASA SPDF/CDAWeb, \emph{OMNI2 hourly} : \url{https://spdf.gsfc.nasa.gov/pub/data/omni/omni_cdaweb/hourly/}
+  \item Littérature : modèles par tranche de $L$ de type \emph{PreMevE}, ceinture externe
+        $2{,}8 \le L \le 6{,}0$ à une résolution de 0,1.
+\end{itemize}
+
+\end{document}

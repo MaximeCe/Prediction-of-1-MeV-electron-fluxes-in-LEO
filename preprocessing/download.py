@@ -1,7 +1,7 @@
 """Download the raw NOAA-15 SEM-2 daily NetCDF files from the NCEI portal.
 
 This is the *upstream* half of Step 1: the daily 2 s files are reduced offline into the
-hourly table ``data/noaa15_p6_hourly_Lbins.parquet`` that ``sp519.io`` reads. Only this
+hourly table ``data/noaa15_p6_hourly_Lbins.parquet`` that ``preprocessing.io`` reads. Only this
 download is kept in the repository, because the raw files are ~12 GB.
 
 Two behaviours of the previous version were dangerous and are fixed here:

@@ -2,7 +2,7 @@
 
 The pipeline deliberately starts from *hourly* files: the 12 GB of raw 2 s NOAA-15 NetCDF
 are reduced once, offline, into ``noaa15_p6_hourly_Lbins.parquet`` (see
-``sp519.download``/``build_hourly`` for the raw half). Everything downstream is fast and
+``preprocessing.download``/``build_hourly`` for the raw half). Everything downstream is fast and
 reproducible from the two versioned parquet files.
 """
 from __future__ import annotations

@@ -7,7 +7,7 @@
     python pre-processing-pipeline.py --download 2020          # fetch the raw NOAA-15 files
 
 Reads the two hourly parquet files in ``data/`` and writes the modelling table consumed by
-Step 2. All the reasoning choices live in ``sp519/config.py``.
+Step 2. All the reasoning choices live in ``preprocessing/config.py``.
 """
 from __future__ import annotations
 

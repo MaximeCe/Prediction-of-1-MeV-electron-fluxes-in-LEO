@@ -1,7 +1,7 @@
 """One call: the two hourly sources -> the table that Step 2 consumes.
 
-    from sp519.config import Config
-    from sp519 import pipeline
+    from preprocessing.config import Config
+    from preprocessing import pipeline
 
     result = pipeline.run(Config())
     result["table"]     # long table, indexed by (Lbin, time_bin)

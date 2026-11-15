@@ -7,7 +7,7 @@ des paramètres du vent solaire OMNI — SP519 · Space Data Processing · IPSA 
 
 | Fichier | Rôle |
 |---|---|
-| `sp519/` | Package de prétraitement (Step 1) : `config`, `io`, `clean`, `aggregate`, `qc`, `plots`, `pipeline`, `download` |
+| `preprocessing/` | Package de prétraitement (Step 1) : `config`, `io`, `clean`, `aggregate`, `qc`, `plots`, `pipeline`, `download` |
 | `pre-processing-pipeline.py` | Point d'entrée en ligne de commande du Step 1 |
 | `tests/` | Suite de tests `pytest` (écrite avant le code) |
 | `data/noaa15_p6_hourly_Lbins.parquet` | Entrée : flux P6 NOAA-15 horaire par tranche de L (versionné) |
@@ -16,7 +16,7 @@ des paramètres du vent solaire OMNI — SP519 · Space Data Processing · IPSA 
 | `data/table_12h_2020_2024.report.json` | Rapport de qualité du Step 1 (bilan de nettoyage, seuil p95, couverture) |
 | `SP519_project.ipynb` | Notebook du projet (Step 1 : préparation et analyse ; Step 2 : machine learning) |
 
-Les fichiers bruts NOAA-15 (~12 Go) ne sont pas versionnés : `sp519/download.py` les
+Les fichiers bruts NOAA-15 (~12 Go) ne sont pas versionnés : `preprocessing/download.py` les
 re-télécharge dans `data/noaa15_raw/` (répertoire ignoré par Git) sans jamais toucher aux
 tables versionnées. Leur réduction en `noaa15_p6_hourly_Lbins.parquet` est l'étape amont du
 Step 1 ; tout ce qui suit part des deux parquet horaires, si bien que le pipeline complet
@@ -42,8 +42,8 @@ Puis dans VS Code : *Select Kernel* → *Python Environments* → `.venv`, et ex
 
 En Python :
 ```python
-from sp519.config import Config
-from sp519 import pipeline
+from preprocessing.config import Config
+from preprocessing import pipeline
 
 result = pipeline.run(Config(l_range=(3.0, 6.0)))
 result["table"]    # table longue, indexée par (Lbin, time_bin)
@@ -53,20 +53,20 @@ result["report"]   # trace JSON de ce qui a été nettoyé et pourquoi
 
 ## Le prétraitement, de bout en bout
 
-1. **Lecture** des deux entrées horaires (`sp519.io`).
-2. **Nettoyage** (`sp519.clean`) — une heure sans mesure (`n = 0`) est un trou ; un `p6_sum`
+1. **Lecture** des deux entrées horaires (`preprocessing.io`).
+2. **Nettoyage** (`preprocessing.clean`) — une heure sans mesure (`n = 0`) est un trou ; un `p6_sum`
    nul est une vraie mesure « 0 coup » ; le flux horaire est `p6_sum / n` ; les heures dont
    le flux protonique (> 25 MeV, colonne `omni_p1`) dépasse le percentile `spe_percentile`
    de sa propre distribution dans la plage de L sont marquées comme contaminées.
 3. **Sélection** de la région de la ceinture (plage de L justifiée, cf. ci-dessous).
-4. **Agrégation** sur des intervalles de 12 h alignés sur l'epoch UTC (`sp519.aggregate`) :
+4. **Agrégation** sur des intervalles de 12 h alignés sur l'epoch UTC (`preprocessing.aggregate`) :
    moyenne du flux, somme des échantillons bruts, nombre d'heures réellement observées,
    taux de contamination, et moyenne des paramètres OMNI sur les mêmes intervalles.
-5. **Qualité** (`sp519.qc`) : couverture par tranche de L, statistiques, et seuil du
+5. **Qualité** (`preprocessing.qc`) : couverture par tranche de L, statistiques, et seuil du
    95ᵉ percentile qui définit un « événement ».
 6. **Écriture** de `data/table_12h_2020_2024.parquet` et de son rapport JSON.
 
-Toutes les valeurs numériques du pipeline vivent dans `sp519/config.py`, chacune avec sa
+Toutes les valeurs numériques du pipeline vivent dans `preprocessing/config.py`, chacune avec sa
 justification, pour que le rapport puisse pointer un seul fichier.
 
 ## Choix justifiés
@@ -76,7 +76,7 @@ justification, pour que le rapport puisse pointer un seul fichier.
 | Plage de L | **3.0 – 6.0** | Sous L = 3 le canal P6 est dominé par les protons piégés (ceinture interne, anomalie de l'Atlantique sud) : le flux mesuré n'est plus celui des électrons. Au-delà de L = 6 les passages de NOAA-15 (810 km) sont trop rares. 3–6 contient le slot et tout le maximum de la ceinture externe, avec 13 à 31 mesures par heure et par tranche de 0,25 L. Cohérent avec la littérature (2.8–6.0 chez PreMevE 2.0 et Kieokaew et al. 2026). |
 | Résolution | **12 h** | Imposée par l'énoncé du Step 1, et multiple des horizons +12/+24/+36/+48 h du Step 2. |
 | Cible | `mep_pro_tel90_flux_p6` | Canal proton du télescope 90°, dominé par les électrons > ~1 MeV dans les ceintures ; d'où le marquage des périodes de contamination protonique. |
-| Seuil d'événement | **p95** | Imposé par l'énoncé ; calculé sur la table 12 h. Pour une évaluation honnête au Step 2, le recalculer sur la seule période d'entraînement (`sp519.qc.event_threshold`). |
+| Seuil d'événement | **p95** | Imposé par l'énoncé ; calculé sur la table 12 h. Pour une évaluation honnête au Step 2, le recalculer sur la seule période d'entraînement (`preprocessing.qc.event_threshold`). |
 | Contamination protonique | percentile **99.5** du flux protonique dans la plage de L | Règle pilotée par les données plutôt qu'un seuil physique fixe : elle reste valable du minimum au maximum solaire. Le drapeau est reporté (`contaminated_frac`) et non appliqué ; `Config(drop_contaminated=True)` retire les heures marquées. |
 
 ## Résultats sur 2020–2024

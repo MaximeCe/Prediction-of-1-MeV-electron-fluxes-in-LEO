@@ -1,6 +1,6 @@
 """Figures of Step 1 ("visualize the time series", "study the relationships").
 
-Every function takes the long table produced by ``sp519.aggregate.to_long_table`` and returns
+Every function takes the long table produced by ``preprocessing.aggregate.to_long_table`` and returns
 a matplotlib Figure, so the notebook can display it and the CLI can save it.
 """
 from __future__ import annotations
