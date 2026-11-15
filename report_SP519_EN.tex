@@ -1,0 +1,216 @@
+% =====================================================================
+%  SP519 - Space Data Processing - Project report (EN)
+%  Prediction of 1 MeV electron fluxes in Low Earth Orbit (NOAA-15)
+%  Compilation : pdflatex report_SP519_EN.tex   (or lualatex)
+%  Figures referenced from repo/figures (or figures/)
+% =====================================================================
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[top=1.5cm,bottom=1.6cm,left=1.7cm,right=1.7cm]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+
+\graphicspath{{repo/figures/}{figures/}}
+
+\setlength{\parskip}{0.25em}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{0.7cm}
+
+% --- running header / footer: authors, date, course name ---
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Maxime Cellier \& Alexandre Saint-Paul}
+\rhead{SP519 -- Space Data Processing}
+\cfoot{\thepage}
+\rfoot{\today}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.2pt}
+
+\begin{document}
+\twocolumn[
+\begin{center}
+{\large\bfseries Prediction of 1 MeV electron fluxes in Low Earth Orbit\\ from NOAA-15 and solar wind data}
+\end{center}
+\vspace{0.2cm}
+]
+
+\section{Introduction and objectives}
+
+Electrons above 1\,MeV charge low-Earth-orbit (LEO) satellites and can damage their electronics;
+their flux can change by orders of magnitude within one or two days after a solar-wind
+disturbance, which makes forecasting it a key space-weather problem. NOAA-15 is a polar satellite
+($\approx 810$\,km) that crosses the radiation belts on every orbit, the position along a field
+line being described by the McIlwain parameter $L$.
+
+This project builds a complete data-driven pipeline, from raw data to prediction, over 2020--2024,
+with two objectives: \textbf{regression} of the future flux at $+12/+24/+36/+48$\,h, and
+\textbf{classification} of whether an ``event'' (flux above the 95th percentile) will occur.
+
+\section{Data and preprocessing}
+
+\subsection{Sources}
+The target is the \texttt{mep\_pro\_tel90\_flux\_p6} channel of NOAA-15 SEM-2 (MEPED), from the
+NOAA/NCEI portal, aggregated hourly and by $L$ bin of 0.25: 1\,234\,141 rows over 1\,808 measured
+days. This channel is nominally a \emph{proton} channel ($>$\,6.9\,MeV) but, inside the belts, its
+counts are dominated by electrons above 1\,MeV -- except during a solar proton event, when it
+measures protons again (the ``when it does not measure electrons'' case). Solar and geomagnetic
+parameters come from the hourly OMNI2 database (NASA SPDF/CDAWeb, read with \texttt{cdflib}):
+$V$, $B_z$, $F10.7$, $N$, $P$, $E$, $|B|$ and the $K_p$, $Dst$, $AE$ indices ($<$\,1.6\,\% missing).
+
+\subsection{Cleaning and synchronisation}
+At the \textbf{2\,s raw-measurement} level: fill values ($-999$) set to NaN, invalid $L$ and
+in-flight-calibration measurements removed. On the \textbf{hourly table}: an hour with no
+measurement ($n=0$) is a gap, whereas a zero flux is a genuine ``0 count'' measurement; isolated
+spikes (up to $9.8\times10^{7}$, vs.\ a 99.99th percentile $\approx 10^{6}$) are removed above
+$10^{7}$; hours contaminated by solar protons are flagged in the polar cap ($L\ge 10$) by a
+\emph{median\,+\,10\,$\times$MAD} threshold held for $\ge 2$\,h, then dropped. The cleaning ledger
+keeps 1\,210\,218 rows out of 1\,234\,141, with 23\,923 removed for proton contamination.
+
+\subsection{Predicted region and 12\,h averaging}
+The retained region is $3 \le L < 6$. Below $L=3$ the channel mostly counts trapped protons of the
+inner belt (South Atlantic Anomaly); above $L\approx 6$ the flux drops sharply (574 vs.\
+214\,\#/cm²/s/sr at $L=6$ and $6.75$) towards the instrument noise (133\,\#/cm²/s/sr), and the
+satellite samples the belt too rarely. The region holds the flux maximum (near $L\approx 4.25$)
+and satisfies the three expected criteria: flux above $2\times$ the noise in \textbf{92\,\%} of
+windows, strong \textbf{variability} ($\sigma$ of $\log_{10}$ flux $\approx 0.53$) and a
+\textbf{link with the solar wind} (Spearman with $V$ 24\,h earlier $\approx 0.36$). All parameters
+are then averaged over \textbf{12\,h windows}; a window's flux is $\sum p6\_sum / \sum n$, it is
+invalid below 25\,\% of the median sample count, and short gaps ($\le 5$ days) are interpolated.
+The final table has 3\,654 windows and feeds the modelling. Figure~\ref{fig:map} shows the belt
+structure.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{3_carte_L_temps.png}
+\caption{Daily mean NOAA-15 P6 flux (log$_{10}$, colour scale) per $L$ bin over 2020--2024. The
+dashed lines delimit the retained region $3 \le L < 6$; the bottom panel shows the $Dst$ index.}
+\label{fig:map}
+\end{figure}
+
+\section{Statistical analysis}
+
+The $\log_{10}$ flux is compact (mean 3.23, standard deviation 0.53, range 1.97--4.64). The
+\emph{lagged} correlations confirm the acceleration delay: $V$ peaks at $+0.45$ at 60\,h, $K_p$
+at $+0.41$ at 84\,h, $AE$ at $+0.38$, $Dst$ at $-0.38$ at 60\,h, $F10.7$ at $+0.26$, while the
+instantaneous $B_z$ is poorly correlated ($-0.07$). Extreme solar-wind values occur seven times
+more often during a storm (23\,\% vs.\ 3\,\%): these are genuine phenomena, kept because they are
+precisely the situations to predict.
+
+The \textbf{event threshold} is the 95th percentile of the 12\,h flux over measured windows:
+\textbf{12\,500\,\#/cm²/s/sr} ($\log_{10}\approx 4.10$), isolating 178 windows (5.0\,\%) in 59
+episodes (14 in 2024). For the classification task it is \emph{recomputed on the training period
+only}, so as not to use information about the future (Figure~\ref{fig:p95}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{7_seuil_P95.png}
+\caption{12\,h flux in the retained region; the dashed line is the 95th-percentile threshold
+(12\,500) and the red points are the resulting events.}
+\label{fig:p95}
+\end{figure}
+
+\section{Modelling}
+
+\subsection{Protocol}
+The test set must play the role of a never-seen future: the split is therefore
+\textbf{chronological} (training before 2024, test in 2024), with interpolated windows excluded
+from the test. Every model is compared with a \emph{persistence} baseline (future flux $=$ current
+flux). The inputs are the $\log_{10}$ flux and the solar parameters at $t$, $t-12$\,h and
+$t-24$\,h.
+
+\subsection{Regression}
+A linear regression (standardised inputs) and a random forest are trained per horizon; the test
+metrics (in $\log_{10}$ flux units) are given in Table~\ref{tab:reg}.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{Regression: RMSE ($R^2$) on the 2024 test set.}
+\label{tab:reg}
+\begin{tabular}{lccc}
+\toprule
+ & Persistence & Linear reg. & Random forest \\
+\midrule
+$+12$\,h & 0.204 (0.874) & \textbf{0.155 (0.927)} & 0.165 (0.917) \\
+$+24$\,h & 0.212 (0.863) & \textbf{0.176 (0.906)} & 0.196 (0.883) \\
+$+36$\,h & 0.289 (0.744) & \textbf{0.216 (0.857)} & 0.246 (0.815) \\
+$+48$\,h & 0.286 (0.749) & \textbf{0.225 (0.844)} & 0.266 (0.782) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Linear regression \textbf{beats persistence at every horizon}, the gain growing with the horizon
+(the solar wind of previous days carries information the current flux does not, see
+Figure~\ref{fig:reg}). The random forest does \emph{worse} on average: its error concentrates on
+low fluxes, where it cannot extrapolate a trend; elsewhere it is slightly better. Its most useful
+inputs are the current and past flux (66--83\,\% of the importance). On \textbf{large variations}
+(factor $\ge 3$), both models clearly cut the persistence error (RMSE $\approx 0.40$--$0.45$
+vs.\ $0.67$--$0.74$), which remains a factor 2.5 to 3.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{8_metriques_3_modeles.png}
+\caption{RMSE, MAE and $R^2$ on the 2024 test set as a function of the forecast horizon, for the
+persistence baseline, the linear regression and the random forest.}
+\label{fig:reg}
+\end{figure}
+
+\subsection{Classification}
+Three classifiers are compared (logistic regression, RBF SVM, random forest; probabilities via
+\texttt{CalibratedClassifierCV} for the SVM). The test set has 498 windows, 40 of them events
+(8.0\,\%): the classes are highly imbalanced and \emph{accuracy} alone is misleading (a model that
+never predicts an event would already reach 92\,\%). We therefore judge on AUC and F1
+(Table~\ref{tab:clf}, Figure~\ref{fig:roc}).
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{Classification: metrics on the test set (498 windows, 40 events).}
+\label{tab:clf}
+\begin{tabular}{lccccc}
+\toprule
+Model & Acc. & Prec. & Recall & F1 & AUC \\
+\midrule
+Logistic reg. & 0.58 & 0.137 & \textbf{0.80} & \textbf{0.234} & \textbf{0.789} \\
+SVM (RBF)     & 0.92 & 0.00  & 0.00 & 0.00 & 0.697 \\
+Random forest & 0.92 & 0.00  & 0.00 & 0.00 & 0.702 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.78\columnwidth]{9_roc_curves.png}
+\caption{ROC curves on the test set (AUC in the legend).}
+\label{fig:roc}
+\end{figure}
+
+Only the logistic regression actually detects events. The SVM and the forest have an AUC near
+0.70, but their implicit 0.5 probability threshold produces no detection (positive class at
+$\approx 5$\,\%, class weights). The informative result is thus the AUC, which measures the
+\emph{ranking} ability, and is more robust than an F1 computed on few positives.
+
+\section{Discussion and perspectives}
+
+A real but moderate part of the flux is predictable: linear regression explains 84 to 93\,\% of
+the variance from $+12$ to $+48$\,h, and the classification AUC reaches 0.79. Two limitations
+stand out: the \textbf{size of the event sample} (the 2024 flux being lower, the learned threshold
+captures more windows at test time and the F1 is unstable), and the poor anticipation of the
+\textbf{outer edge} and of \textbf{storms}. Possible improvements: extend the test period
+(2023--2024) and use a rolling cross-validation; train \emph{per $L$ bin} instead of an averaged
+region; add parameters and measure the gain; analyse the models' behaviour during the May 2024
+storm.
+
+\section*{References}
+\small
+\begin{itemize}\setlength{\itemsep}{0pt}
+  \item NOAA/NCEI, \emph{POES/MetOp SEM-2}: \url{https://www.ncei.noaa.gov/products/poes-metop-space-environment-monitor}
+  \item NASA SPDF/CDAWeb, \emph{OMNI2 hourly}: \url{https://spdf.gsfc.nasa.gov/pub/data/omni/omni_cdaweb/hourly/}
+  \item Literature: per-$L$-bin models of the \emph{PreMevE} type, outer belt
+        $2.8 \le L \le 6.0$ at 0.1 resolution.
+\end{itemize}
+
+\end{document}
